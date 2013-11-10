@@ -2,26 +2,37 @@ import glob
 import json
 import os
 import tkinter as tk
+from tkinter import ttk
 from PIL import Image, ImageTk, ImageOps
 import time
+import copy
+
+
+SETTINGS_TEMPLATE = '{"default":{"timer":5000,"name":"Default"}}'
+SETTINGS_FILE = "easyslide_settings.json"
 
 class App():
     def __init__(self):
         self.root = tk.Tk()
-        self.root.geometry("%dx%d+0+0" % (200, 200))
         self.root.focus_set()
         self.root.bind("<Escape>", lambda e: e.widget.quit())
-        self.path_label = tk.Label(self.root,text="Path to Folder of Slide Show")
-        self.path_label.pack()
-        self.path_text = tk.Entry(self.root)
-        self.path_text.pack()
-        self.start_slide_show_button = tk.Button(self.root,text="Start Slide Show",command=self.start_slide_show)
-        self.start_slide_show_button.pack()
+        self.path = tk.StringVar()
+        self._set_up_main_screen()
         self.root.mainloop()
 
+    def _set_up_main_screen(self):
+        self.main_screen = ttk.Frame(self.root,padding=(10,10,10,10))
+        ttk.Label(self.main_screen,text="Path to Folder of Slide Show").pack()
+        ttk.Entry(self.main_screen,textvariable=self.path).pack()
+        ttk.Button(self.main_screen,text="Start Slide Show",command=self.start_slide_show).pack()
+        ttk.Button(self.main_screen,text="Modify Settings",command=self.modify_or_create_settings).pack()
+        self.main_screen.pack()
+
+    def _forget_main_screen(self):
+        self.main_screen.pack_forget()
+
     def start_slide_show(self):
-        self.path = self.path_text.get()
-        self._forget_open_window()
+        self._forget_main_screen()
         self._set_up_show_screen()
         self._load_or_create_settings()
         self._load_slides()
@@ -37,23 +48,27 @@ class App():
             self._load_slides()
             self.slide_index = 0
         try:
-            image = Image.open(image_path)
-            image = ImageOps.fit(image=image,size=(self.screen_width,self.screen_height))
-            tkpi = ImageTk.PhotoImage(image) 
-            self.label_image.configure(image=tkpi)
-            self.label_image.image = tkpi
+            new_image = Image.open(image_path)
+            new_image = ImageOps.fit(image=new_image,size=(self.screen_width,self.screen_height))
+            old_image = self.current_image
+            self.transition(old_image,new_image)
             if file_name not in self.settings:
-                slide_length = self.settings["default"]["timer"]
+                slide_length = self.settings["default"]["timer"].get()
             else:
-                slide_length = self.settings[file_name]["timer"]
+                slide_length = self.settings[file_name]["timer"].get()
             self.root.after(slide_length, self.update_slide)
         except IOError:
             self.update_slide()
 
-    def _forget_open_window(self):
-        self.start_slide_show_button.pack_forget()
-        self.path_label.pack_forget()
-        self.path_text.pack_forget()
+    def transition(self,image1,image2):
+        transition_aplphas = (alpha/10.0 for alpha in range(1,11))
+        for alpha in transition_aplphas:
+            new_image = Image.blend(image1,image2,alpha)
+            self.current_image = new_image
+            tkpi = ImageTk.PhotoImage(self.current_image) 
+            self.label_image.configure(image=tkpi)
+            self.label_image.image = tkpi
+            self.root.update_idletasks()
 
     def _set_up_show_screen(self):
         self.root.configure(cursor="none")
@@ -61,20 +76,71 @@ class App():
         self.screen_width, self.screen_height = self.root.winfo_screenwidth(), self.root.winfo_screenheight()
         self.root.geometry("%dx%d+0+0" % (self.screen_width, self.screen_height))
         self.label_image = tk.Label(self.root)
-        self.label_image.configure(background='black')
+        self.label_image.configure()
         self.label_image.place(x=0,y=0,width=self.screen_width,height=self.screen_height)
+        self.current_image = Image.new("RGB",(self.screen_width,self.screen_height))
+        tkpi = ImageTk.PhotoImage(self.current_image) 
+        self.label_image.configure(image=tkpi)
+        self.label_image.image = tkpi
         self.label_image.pack()
 
     def _load_or_create_settings(self):
-        json_data=open(self.path + "easyslide_settings.json")
-        self.settings = json.load(json_data)
-        json_data.close()
+        if not os.path.isfile(self.path.get() + SETTINGS_FILE):
+            with open(self.path.get() + SETTINGS_FILE,"w") as setting_file:
+                setting_file.write(SETTINGS_TEMPLATE)
+        with open(self.path.get() + SETTINGS_FILE) as json_data:
+            self.settings = json.load(json_data)
+            for key in self.settings:
+                time = self.settings[key]["timer"]
+                timeTCLVar = tk.IntVar()
+                timeTCLVar.set(time)
+                self.settings[key]["timer"] = timeTCLVar
+                imageTCLVar = tk.StringVar()
+                imageTCLVar.set(key)
+                self.settings[key]["name"] = imageTCLVar
+
 
     def _load_slides(self):
         types = ("*.jpg","*.gif","*.png","*.jpeg","*.tiff","*.JPG","*.GIF","*.PNG","*.JPEG","*.TIFF")
         self.slides = []
         for files in types:
-            self.slides.extend(glob.glob(self.path + files))
+            self.slides.extend(glob.glob(self.path.get() + files))
+        self.slides.sort()
+
+    def modify_or_create_settings(self):
+        options = ["default"] + os.listdir(self.path.get())
+        self._load_or_create_settings()
+        self._forget_main_screen()
+        self.settings_screen = ttk.Frame(self.root)
+        self._draw_settings_screen()
+
+    def _draw_settings_screen(self):
+        for child in self.settings_screen.winfo_children():
+            child.pack_forget()
+        for key in self.settings:
+            ttk.Label(self.settings_screen,text=self.settings[key]["name"].get()).pack()
+            ttk.Entry(self.settings_screen,textvariable=str(self.settings[key]["timer"])).pack()
+            ttk.Button(self.settings_screen,text="Delete",command= lambda: self._delete_setting(key)).pack()
+        ttk.Button(self.settings_screen,text="Save",command= self.save_settings).pack()
+        self.settings_screen.pack()
+
+    def _delete_setting(self,key):
+        del self.settings[key]
+        self._draw_settings_screen()
+
+    def save_settings(self):
+        with open(self.path.get() + SETTINGS_FILE,"w") as setting_file:
+            json_serialize = copy.deepcopy(self.settings)
+            for key in json_serialize:
+                json_serialize[key]["name"] = json_serialize[key]["name"].get()
+                json_serialize[key]["timer"] = int(json_serialize[key]["timer"].get())
+            json.dump(json_serialize, setting_file) 
+
+
+
+            
+
+
 
 app=App()
 app.mainloop()
