@@ -2,7 +2,7 @@ import glob
 import json
 import os
 import tkinter as tk
-from tkinter import ttk
+from tkinter import ttk, filedialog
 from PIL import Image, ImageTk, ImageOps
 import time
 import copy
@@ -86,9 +86,19 @@ class App():
 
     def _load_or_create_settings(self):
         if not os.path.isfile(self.path.get() + SETTINGS_FILE):
-            with open(self.path.get() + SETTINGS_FILE,"w") as setting_file:
+            self.create_settings_file()
+        try:
+            self.load_settings_file()
+        except:
+            self.create_settings_file()
+            self.load_settings_file()
+
+    def create_settings_file(self):
+        with open(self.path.get() + SETTINGS_FILE,"w",encoding='utf-8') as setting_file:
                 setting_file.write(SETTINGS_TEMPLATE)
-        with open(self.path.get() + SETTINGS_FILE) as json_data:
+
+    def load_settings_file(self):
+        with open(self.path.get() + SETTINGS_FILE, encoding='utf-8') as json_data:
             self.settings = json.load(json_data)
             for key in self.settings:
                 time = self.settings[key]["timer"]
@@ -115,13 +125,20 @@ class App():
         self._draw_settings_screen()
 
     def _draw_settings_screen(self):
-        for child in self.settings_screen.winfo_children():
+        for child in self.root.winfo_children():
             child.pack_forget()
+
+        ttk.Label(self.settings_screen,text=self.settings["default"]["name"].get()).grid(row=0,column=0)
+        ttk.Entry(self.settings_screen,textvariable=str(self.settings["default"]["timer"])).grid(row=0,column=1)
+        row = 1
         for key in self.settings:
-            ttk.Label(self.settings_screen,text=self.settings[key]["name"].get()).pack()
-            ttk.Entry(self.settings_screen,textvariable=str(self.settings[key]["timer"])).pack()
-            ttk.Button(self.settings_screen,text="Delete",command= lambda: self._delete_setting(key)).pack()
-        ttk.Button(self.settings_screen,text="Save",command= self.save_settings).pack()
+            if key != "default":
+                ttk.Label(self.settings_screen,text=self.settings[key]["name"].get()).grid(row=row,column=0)
+                ttk.Entry(self.settings_screen,textvariable=str(self.settings[key]["timer"])).grid(row=row,column=1)
+                ttk.Button(self.settings_screen,text="Delete",command= lambda: self._delete_setting(key)).grid(row=row,column=2)
+                row += 1
+        ttk.Button(self.settings_screen,text="Save",command= self.save_settings).grid(row=row,column=0)
+        ttk.Button(self.settings_screen,text="Add Setting",command= self.add_setting).grid(row=row,column=2)
         self.settings_screen.pack()
 
     def _delete_setting(self,key):
@@ -129,13 +146,35 @@ class App():
         self._draw_settings_screen()
 
     def save_settings(self):
-        with open(self.path.get() + SETTINGS_FILE,"w") as setting_file:
-            json_serialize = copy.deepcopy(self.settings)
-            for key in json_serialize:
-                json_serialize[key]["name"] = json_serialize[key]["name"].get()
-                json_serialize[key]["timer"] = int(json_serialize[key]["timer"].get())
-            json.dump(json_serialize, setting_file) 
+        with open(self.path.get() + SETTINGS_FILE,"w", encoding='utf-8') as setting_file:
+            json_serialize = self.json_settings()
+            setting_file.write(json_serialize)
 
+    def set_path_dialog(self):
+        self.path.set(filedialog.askdirectory("/") +"/")
+
+    def new_setting_dialog(self):
+        file_path = filedialog.askopenfilename(initialdir=self.path.get())
+        path,filenname = os.path.split(file_path)
+        return filenname
+
+
+
+    def json_settings(self):
+        json_string='{'
+        for key in self.settings:
+            json_string += '"{}":{{"timer":{}, "name":"{}"}},'.format(key,self.settings[key]["timer"].get(),self.settings[key]["name"].get())
+
+        return json_string[0:-1] + "}"
+
+    def add_setting(self):
+        path,filename = os.path.split(self.new_setting_dialog())
+        name = tk.StringVar()
+        name.set(filename)
+        time = tk.IntVar()
+        time.set(self.settings["default"]["timer"].get())
+        self.settings[filename] = {"name":name,"timer":time}
+        self._draw_settings_screen()
 
 
             
